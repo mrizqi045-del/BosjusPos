@@ -317,7 +317,62 @@
         }
       });
       const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+function App() {
+  // === 1. STATE LAMA ANDA ===
+  const [cart, setCart] = useState([]);
+  const [activeTab, setActiveTab] = useState('pos');
 
+  // === 2. TEMPEL KODE SUPABASE DI SINI ===
+  const [products, setProducts] = useState([]);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+
+  const fetchProducts = async () => {
+    if (!supabase) return;
+    setLoadingProducts(true);
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('id', { ascending: true });
+
+      if (error) throw error;
+      if (data) setProducts(data);
+    } catch (error) {
+      console.error('Gagal memuat produk:', error.message);
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const handleAddProduct = async (newProductData) => {
+    if (!supabase) return;
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .insert([newProductData])
+        .select();
+
+      if (error) throw error;
+      if (data && data.length > 0) {
+        setProducts((prev) => [...prevProducts, data[0]]);
+        alert('Produk berhasil disimpan ke Supabase!');
+      }
+    } catch (error) {
+      alert('Gagal menyimpan: ' + error.message);
+    }
+  };
+
+  // === 3. KODE RENDER / TAMPILAN HALAMAN DI BAWAHNYA ===
+  return (
+    <div className="min-h-screen">
+      {/* Tampilan Kasir / POS Anda */}
+    </div>
+  );
+}
       const handleTabSwitch = (tab) => {
         setActiveTab(tab);
         if (tab === 'pos') {
