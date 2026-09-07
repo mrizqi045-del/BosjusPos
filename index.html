@@ -8602,11 +8602,14 @@
 
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
+  </script> <!-- Ini adalah penutup skrip Babel React -->
+
+  <!-- Inisialisasi Supabase diletakkan DI LUAR skrip React -->
   <script>
-  // Inisialisasi Supabase Client
-const SUPABASE_URL = 'https://inukuuqwbczsyrnmka.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImludWt1dXF3YmNmenN5dXJubWthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NjQ3NDIsImV4cCI6MjEwNDM0MDc0Mn0.PWNpPGNTUJn57qqRC_XGKAP1vNN6bsVwKtG66tzSRmo';
-const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+    const SUPABASE_URL = 'https://inukuuqwbczsyrnmka.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImludWt1dXF3YmNmenN5dXJubWthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg3NjQ3NDIsImV4cCI6MjEwNDM0MDc0Mn0.PWNpPGNTUJn57qqRC_XGKAP1vNN6bsVwKtG66tzSRmo';
+    const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+    console.log("Supabase siap:", supabase ? "Terhubung" : "Gagal");
   </script>
 </body>
 </html>
