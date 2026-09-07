@@ -1,0 +1,8 @@
+# Konfigurasi Netlify untuk BosJusPos (Single Page App)
+[build]
+  publish = "."
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
