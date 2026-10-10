@@ -59,6 +59,24 @@ function parseJsonSafe(val, fallback) {
   }
 }
 
+// Smart Union Merge Helper by ID (mencegah data offline menimpa data server)
+function mergeArrayRecords(incomingArr, existingArr, sortKey = 'date') {
+  if (!Array.isArray(incomingArr) || incomingArr.length === 0) return existingArr || [];
+  if (!Array.isArray(existingArr) || existingArr.length === 0) return incomingArr || [];
+  const map = new Map();
+  for (const item of existingArr) {
+    if (item && item.id) map.set(item.id, item);
+  }
+  for (const item of incomingArr) {
+    if (item && item.id) map.set(item.id, item);
+  }
+  const merged = Array.from(map.values());
+  if (sortKey) {
+    merged.sort((a, b) => new Date(b[sortKey] || 0) - new Date(a[sortKey] || 0));
+  }
+  return merged;
+}
+
 module.exports = async function handler(req, res) {
   // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -200,6 +218,44 @@ module.exports = async function handler(req, res) {
             }
           }
         }
+      }
+
+      // Smart Union Merge: Gabungkan transaksi, keuangan, log stok yang dibuat saat offline agar tidak menimpa data server
+      if (dataObj.bjp_transactions_v7 && existingMap.bjp_transactions_v7) {
+        const inc = parseJsonSafe(dataObj.bjp_transactions_v7, []);
+        const ex = parseJsonSafe(existingMap.bjp_transactions_v7, []);
+        dataObj.bjp_transactions_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+      }
+
+      if (dataObj.bjp_finance_v7 && existingMap.bjp_finance_v7) {
+        const incFin = parseJsonSafe(dataObj.bjp_finance_v7, {});
+        const exFin = parseJsonSafe(existingMap.bjp_finance_v7, {});
+        dataObj.bjp_finance_v7 = JSON.stringify({
+          modalUsaha: incFin.modalUsaha !== undefined ? incFin.modalUsaha : exFin.modalUsaha,
+          profitSplit: incFin.profitSplit || exFin.profitSplit,
+          expenses: mergeArrayRecords(incFin.expenses || [], exFin.expenses || [], 'date'),
+          incomes: mergeArrayRecords(incFin.incomes || [], exFin.incomes || [], 'date')
+        });
+      }
+
+      if (dataObj.bjp_transfers_v7 && existingMap.bjp_transfers_v7) {
+        const inc = parseJsonSafe(dataObj.bjp_transfers_v7, []);
+        const ex = parseJsonSafe(existingMap.bjp_transfers_v7, []);
+        dataObj.bjp_transfers_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+      }
+
+      if (dataObj.bjp_raw_material_logs_v7 && existingMap.bjp_raw_material_logs_v7) {
+        const inc = parseJsonSafe(dataObj.bjp_raw_material_logs_v7, []);
+        const ex = parseJsonSafe(existingMap.bjp_raw_material_logs_v7, []);
+        dataObj.bjp_raw_material_logs_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+      }
+
+      if ((dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7) && (existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7)) {
+        const inc = parseJsonSafe(dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7, []);
+        const ex = parseJsonSafe(existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7, []);
+        const mergedOff = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+        dataObj.ownerOfficeTransfers = mergedOff;
+        dataObj.bjp_office_transfers_v7 = mergedOff;
       }
 
       // Eksekusi Upsert
