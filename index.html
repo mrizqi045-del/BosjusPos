@@ -131,11 +131,10 @@
 
   <!-- Preloaded Data from Server (Instant 0s Load) -->
   <script id="preloaded-data" type="application/json">
-    <?!= serverPreloadedData || '{}' ?>
+    {}
   </script>
   <script>
-    var rawUrl = "<?= typeof webAppUrl !== 'undefined' ? webAppUrl : '' ?>";
-    window.__WEB_APP_URL__ = (rawUrl && rawUrl.indexOf('<') === -1) ? rawUrl : 'https://script.google.com/macros/s/AKfycbwmtbxK5N7zwkvgsVow-3y6DTJsTIHQ6iMAbnhj7ViUgid4OHYsxNEHYIrAcxajtFTUg/exec';
+    window.__WEB_APP_URL__ = (typeof window !== 'undefined' && window.location && window.location.origin) ? (window.location.origin + '/api/data') : '/api/data';
   </script>
 
   <script type="text/babel">
