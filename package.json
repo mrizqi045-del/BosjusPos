@@ -1,0 +1,14 @@
+{
+  "name": "bosjuspos",
+  "version": "1.0.0",
+  "description": "BosJus POS System - TiDB Cloud + Vercel",
+  "main": "api/data.js",
+  "scripts": {
+    "test-db": "node test_connection.js",
+    "migrate": "node migrate.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.0"
+  }
+}
