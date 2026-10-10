@@ -3543,6 +3543,7 @@
       // Navigation & Auth State
       const [activeTab, setActiveTab] = useState('home'); 
       const [currentUser, setCurrentUser] = useState(null);
+      const [scriptUrl, setScriptUrl] = useState(() => (typeof localStorage !== 'undefined' && localStorage.getItem('bjp_owner_script_url')) || (typeof window !== 'undefined' && window.__WEB_APP_URL__) || '/api/data');
       const [isLoading, setIsLoading] = useState(() => {
         try {
           const hasLocal = !!(localStorage.getItem('bjp_users_v7') || localStorage.getItem('bjp_products_v7'));
