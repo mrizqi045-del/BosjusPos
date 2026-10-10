@@ -71,12 +71,14 @@ module.exports = async function handler(req, res) {
 
   try {
     const db = getPool();
-    await ensureTable(db);
 
     // ==========================================
     // GET: Ambil Data (getAllData / getOwnerData)
     // ==========================================
     if (req.method === 'GET') {
+      // Vercel Edge Cache: Layani dalam hitungan milidetik
+      res.setHeader('Cache-Control', 's-maxage=3, stale-while-revalidate=59');
+
       const action = req.query.action || 'getData';
 
       if (action === 'getOwnerData') {
