@@ -68,7 +68,19 @@ function mergeArrayRecords(incomingArr, existingArr, sortKey = 'date') {
     if (item && item.id) map.set(item.id, item);
   }
   for (const item of incomingArr) {
-    if (item && item.id) map.set(item.id, item);
+    if (item && item.id) {
+      if (map.has(item.id)) {
+        const existing = map.get(item.id);
+        // Jika dua transaksi berbeda kebetulan nomor id sama saat offline (beda waktu > 5 detik), amankan keduanya
+        if (existing.date && item.date && existing.date !== item.date && Math.abs(new Date(existing.date) - new Date(item.date)) > 5000) {
+          const disambiguatedId = `${item.id}-DEV-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+          item.id = disambiguatedId;
+          map.set(disambiguatedId, item);
+          continue;
+        }
+      }
+      map.set(item.id, item);
+    }
   }
   const merged = Array.from(map.values());
   if (sortKey) {
