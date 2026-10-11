@@ -60,15 +60,19 @@ function parseJsonSafe(val, fallback) {
 }
 
 // Smart Union Merge Helper by ID (mencegah data offline menimpa data server)
-function mergeArrayRecords(incomingArr, existingArr, sortKey = 'date') {
+// voidedIds: Set/Array ID yang sudah dihapus/dibatalkan - tidak boleh muncul kembali dari data server lama
+function mergeArrayRecords(incomingArr, existingArr, sortKey = 'date', voidedIds = []) {
   if (!Array.isArray(incomingArr) || incomingArr.length === 0) return existingArr || [];
   if (!Array.isArray(existingArr) || existingArr.length === 0) return incomingArr || [];
+  const voidSet = new Set(Array.isArray(voidedIds) ? voidedIds.map(String) : []);
   const map = new Map();
+  // Masukkan data server lama - skip jika ID sudah dihapus
   for (const item of existingArr) {
-    if (item && item.id) map.set(item.id, item);
+    if (item && item.id && !voidSet.has(String(item.id))) map.set(item.id, item);
   }
+  // Terapkan data incoming (data terbaru dari client) - incoming menang kecuali sudah divoid
   for (const item of incomingArr) {
-    if (item && item.id) {
+    if (item && item.id && !voidSet.has(String(item.id))) {
       if (map.has(item.id)) {
         const existing = map.get(item.id);
         // Jika dua transaksi berbeda kebetulan nomor id sama saat offline (beda waktu > 5 detik), amankan keduanya
@@ -233,10 +237,19 @@ module.exports = async function handler(req, res) {
       }
 
       // Smart Union Merge: Gabungkan transaksi, keuangan, log stok yang dibuat saat offline agar tidak menimpa data server
+      // Ambil daftar ID yang sudah dihapus/dibatalkan dari client - untuk mencegah data lama di server muncul kembali
+      const voidedTxRaw = parseJsonSafe(dataObj.bjp_voided_txs_v7 || existingMap.bjp_voided_txs_v7, []);
+      const deletedRaw = parseJsonSafe(dataObj.bjp_deleted_records_v7 || existingMap.bjp_deleted_records_v7, []);
+      // Gabungkan voided + deleted dari client DAN dari server supaya filter permanen
+      const allVoidedIds = Array.from(new Set([
+        ...(Array.isArray(voidedTxRaw) ? voidedTxRaw.map(String) : []),
+        ...(Array.isArray(deletedRaw) ? deletedRaw.map(String) : [])
+      ]));
+
       if (dataObj.bjp_transactions_v7 && existingMap.bjp_transactions_v7) {
         const inc = parseJsonSafe(dataObj.bjp_transactions_v7, []);
         const ex = parseJsonSafe(existingMap.bjp_transactions_v7, []);
-        dataObj.bjp_transactions_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+        dataObj.bjp_transactions_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date', allVoidedIds));
       }
 
       if (dataObj.bjp_finance_v7 && existingMap.bjp_finance_v7) {
@@ -245,29 +258,35 @@ module.exports = async function handler(req, res) {
         dataObj.bjp_finance_v7 = JSON.stringify({
           modalUsaha: incFin.modalUsaha !== undefined ? incFin.modalUsaha : exFin.modalUsaha,
           profitSplit: incFin.profitSplit || exFin.profitSplit,
-          expenses: mergeArrayRecords(incFin.expenses || [], exFin.expenses || [], 'date'),
-          incomes: mergeArrayRecords(incFin.incomes || [], exFin.incomes || [], 'date')
+          expenses: mergeArrayRecords(incFin.expenses || [], exFin.expenses || [], 'date', allVoidedIds),
+          incomes: mergeArrayRecords(incFin.incomes || [], exFin.incomes || [], 'date', allVoidedIds)
         });
       }
 
       if (dataObj.bjp_transfers_v7 && existingMap.bjp_transfers_v7) {
         const inc = parseJsonSafe(dataObj.bjp_transfers_v7, []);
         const ex = parseJsonSafe(existingMap.bjp_transfers_v7, []);
-        dataObj.bjp_transfers_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+        dataObj.bjp_transfers_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date', allVoidedIds));
       }
 
       if (dataObj.bjp_raw_material_logs_v7 && existingMap.bjp_raw_material_logs_v7) {
         const inc = parseJsonSafe(dataObj.bjp_raw_material_logs_v7, []);
         const ex = parseJsonSafe(existingMap.bjp_raw_material_logs_v7, []);
-        dataObj.bjp_raw_material_logs_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+        dataObj.bjp_raw_material_logs_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date', allVoidedIds));
       }
 
       if ((dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7) && (existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7)) {
         const inc = parseJsonSafe(dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7, []);
         const ex = parseJsonSafe(existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7, []);
-        const mergedOff = JSON.stringify(mergeArrayRecords(inc, ex, 'date'));
+        const mergedOff = JSON.stringify(mergeArrayRecords(inc, ex, 'date', allVoidedIds));
         dataObj.ownerOfficeTransfers = mergedOff;
         dataObj.bjp_office_transfers_v7 = mergedOff;
+      }
+
+      // Gabungkan daftar voided/deleted dari server dan client, lalu simpan versi terbaru yang lebih lengkap
+      if (allVoidedIds.length > 0) {
+        dataObj.bjp_voided_txs_v7 = JSON.stringify(allVoidedIds);
+        dataObj.bjp_deleted_records_v7 = JSON.stringify(allVoidedIds);
       }
 
       // Eksekusi Upsert
