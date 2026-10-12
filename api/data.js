@@ -110,8 +110,8 @@ module.exports = async function handler(req, res) {
     // GET: Ambil Data (getAllData / getOwnerData)
     // ==========================================
     if (req.method === 'GET') {
-      // Vercel Edge Cache: Layani dalam hitungan milidetik
-      res.setHeader('Cache-Control', 's-maxage=3, stale-while-revalidate=59');
+      // Real-time multi-device sync: no cache agar HP & PC selalu dapat data terkini
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
 
       const action = req.query.action || 'getData';
 
