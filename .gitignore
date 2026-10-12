@@ -5,3 +5,4 @@ node_modules
 *.log
 Database.csv
 export_clean.json
+babel.min.js
