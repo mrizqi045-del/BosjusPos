@@ -156,6 +156,11 @@ module.exports = async function handler(req, res) {
         ]);
       }
 
+      // Normalisasi invoice dev hasil tabrakan batas lama 900000
+      if (data['bjp_transactions_v7']) {
+        data['bjp_transactions_v7'] = data['bjp_transactions_v7'].replace(/INV-PC-900000-DEV-[A-Za-z0-9]+/g, 'INV-PC-900001');
+      }
+
       return res.status(200).json({ status: 'success', data });
     }
 
@@ -256,6 +261,13 @@ module.exports = async function handler(req, res) {
         ...(Array.isArray(voidedTxRaw) ? voidedTxRaw.map(String) : []),
         ...(Array.isArray(deletedRaw) ? deletedRaw.map(String) : [])
       ]));
+
+      if (dataObj.bjp_transactions_v7) {
+        dataObj.bjp_transactions_v7 = dataObj.bjp_transactions_v7.replace(/INV-PC-900000-DEV-[A-Za-z0-9]+/g, 'INV-PC-900001');
+      }
+      if (existingMap.bjp_transactions_v7) {
+        existingMap.bjp_transactions_v7 = existingMap.bjp_transactions_v7.replace(/INV-PC-900000-DEV-[A-Za-z0-9]+/g, 'INV-PC-900001');
+      }
 
       if (dataObj.bjp_transactions_v7 && existingMap.bjp_transactions_v7) {
         const inc = parseJsonSafe(dataObj.bjp_transactions_v7, []);
