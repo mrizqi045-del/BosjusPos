@@ -75,7 +75,18 @@ function mergeArrayRecords(incomingArr, existingArr, sortKey = 'date', voidedIds
     if (item && item.id && !voidSet.has(String(item.id))) {
       if (map.has(item.id)) {
         const existing = map.get(item.id);
-        // Jika dua transaksi berbeda kebetulan nomor id sama saat offline (beda waktu > 5 detik), amankan keduanya
+        const incUp = Number(item.updatedAt) || 0;
+        const exUp = Number(existing.updatedAt) || 0;
+        // Jika client mengirim versi yang memiliki updatedAt lebih baru/sama (misal hasil edit tanggal/jam oleh superowner)
+        if (incUp > 0 && incUp >= exUp) {
+          map.set(item.id, item);
+          continue;
+        }
+        if (exUp > incUp) {
+          // Server sudah memiliki versi yang diedit lebih baru
+          continue;
+        }
+        // Jika tidak ada updatedAt baru dan dua transaksi kebetulan nomor id sama saat offline (beda waktu > 5 detik), amankan keduanya
         if (existing.date && item.date && existing.date !== item.date && Math.abs(new Date(existing.date) - new Date(item.date)) > 5000) {
           const disambiguatedId = `${item.id}-DEV-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
           item.id = disambiguatedId;
