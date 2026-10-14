@@ -221,9 +221,18 @@ module.exports = async function handler(req, res) {
       const action = body.action || 'saveAllData';
 
       // 1. Simpan Data Owner
-      if (action === 'saveOwnerData' || body.ownerCapitalConfig || body.ownerCashFlow || body.ownerDebtInstallments || body.ownerOfficeTransfers) {
+      if (action === 'saveOwnerData') {
         const payload = body.payload || body;
         const upsertPromises = [];
+
+        // Gabungkan deleted records jika ada yang dikirim dari OwnerPortal
+        if (payload.bjp_deleted_records_v7) {
+          const incDel = parseJsonSafe(payload.bjp_deleted_records_v7, []);
+          const [curDelRows] = await db.query('SELECT `value` FROM bjp_data WHERE `key` = ?', ['bjp_deleted_records_v7']);
+          const curDel = curDelRows.length > 0 ? parseJsonSafe(curDelRows[0].value, []) : [];
+          const mergedDel = Array.from(new Set([...curDel.map(String), ...incDel.map(String)]));
+          payload.bjp_deleted_records_v7 = JSON.stringify(mergedDel);
+        }
 
         const mapping = {
           ownerCapitalConfig: payload.ownerCapitalConfig,
@@ -233,7 +242,8 @@ module.exports = async function handler(req, res) {
           bjp_owner_capital_v7: payload.ownerCapitalConfig,
           bjp_owner_cashflow_v7: payload.ownerCashFlow,
           bjp_owner_debts_v7: payload.ownerDebtInstallments,
-          bjp_office_transfers_v7: payload.ownerOfficeTransfers
+          bjp_office_transfers_v7: payload.ownerOfficeTransfers,
+          bjp_deleted_records_v7: payload.bjp_deleted_records_v7
         };
 
         for (const [k, v] of Object.entries(mapping)) {
@@ -292,13 +302,17 @@ module.exports = async function handler(req, res) {
       }
 
       // Smart Union Merge: Gabungkan transaksi, keuangan, log stok yang dibuat saat offline agar tidak menimpa data server
-      // Ambil daftar ID yang sudah dihapus/dibatalkan dari client - untuk mencegah data lama di server muncul kembali
-      const voidedTxRaw = parseJsonSafe(dataObj.bjp_voided_txs_v7 || existingMap.bjp_voided_txs_v7, []);
-      const deletedRaw = parseJsonSafe(dataObj.bjp_deleted_records_v7 || existingMap.bjp_deleted_records_v7, []);
+      // Ambil daftar ID yang sudah dihapus/dibatalkan dari client DAN server - untuk mencegah data lama di server muncul kembali
+      const clientVoided = parseJsonSafe(dataObj.bjp_voided_txs_v7, []);
+      const serverVoided = parseJsonSafe(existingMap.bjp_voided_txs_v7, []);
+      const clientDeleted = parseJsonSafe(dataObj.bjp_deleted_records_v7, []);
+      const serverDeleted = parseJsonSafe(existingMap.bjp_deleted_records_v7, []);
       // Gabungkan voided + deleted dari client DAN dari server supaya filter permanen
       const allVoidedIds = Array.from(new Set([
-        ...(Array.isArray(voidedTxRaw) ? voidedTxRaw.map(String) : []),
-        ...(Array.isArray(deletedRaw) ? deletedRaw.map(String) : [])
+        ...(Array.isArray(clientVoided) ? clientVoided.map(String) : []),
+        ...(Array.isArray(serverVoided) ? serverVoided.map(String) : []),
+        ...(Array.isArray(clientDeleted) ? clientDeleted.map(String) : []),
+        ...(Array.isArray(serverDeleted) ? serverDeleted.map(String) : [])
       ]));
 
       if (dataObj.bjp_transactions_v7) {
@@ -368,10 +382,11 @@ module.exports = async function handler(req, res) {
       if (dataObj.bjp_raw_materials_v7) dataObj.bjp_raw_materials_v7 = fixSirsakStock(dataObj.bjp_raw_materials_v7);
       if (existingMap.bjp_raw_materials_v7) existingMap.bjp_raw_materials_v7 = fixSirsakStock(existingMap.bjp_raw_materials_v7);
 
-      if ((dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7) && (existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7)) {
-        const inc = parseJsonSafe(dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7, []);
+      if (dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7 || existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7) {
+        const inc = parseJsonSafe(dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7, null);
         const ex = parseJsonSafe(existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7, []);
-        const mergedOff = JSON.stringify(mergeArrayRecords(inc, ex, 'date', allVoidedIds));
+        const baseOff = inc !== null ? mergeArrayRecords(inc, ex, 'date', allVoidedIds) : ex.filter(item => item && item.id && !allVoidedIds.includes(String(item.id)));
+        const mergedOff = JSON.stringify(baseOff);
         dataObj.ownerOfficeTransfers = mergedOff;
         dataObj.bjp_office_transfers_v7 = mergedOff;
       }
