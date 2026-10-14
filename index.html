@@ -127,10 +127,12 @@
     {}
   </script>
   <script>
-    window.__WEB_APP_URL__ = (typeof window !== 'undefined' && window.location && window.location.origin) ? (window.location.origin + '/api/data') : '/api/data';
+    window.__WEB_APP_URL__ = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin.startsWith('http')) 
+      ? (window.location.origin + '/api/data') 
+      : 'https://bosjuspos.vercel.app/api/data';
   </script>
 
   <!-- Pre-compiled Native JavaScript Bundle (Instant 0.05s Load, No Babel Standalone in Browser) -->
-  <script src="/app.js?v=2.5.3" defer></script>
+  <script src="./app.js?v=2.5.4" defer></script>
 </body>
 </html>
