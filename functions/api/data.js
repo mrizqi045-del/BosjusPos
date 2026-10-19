@@ -211,7 +211,8 @@ export async function onRequest(context) {
     if (request.method === 'POST') {
       let body;
       try {
-        body = await request.json();
+        const rawText = await request.text();
+        body = typeof rawText === 'string' ? JSON.parse(rawText) : (rawText || {});
       } catch (e) {
         body = {};
       }
@@ -242,20 +243,22 @@ export async function onRequest(context) {
           bjp_deleted_records_v7: payload.bjp_deleted_records_v7
         };
 
-        const upsertPromises = [];
+        const items = [];
         for (const [k, v] of Object.entries(mapping)) {
           if (v !== undefined && v !== null && v !== '') {
             const valStr = typeof v === 'object' ? JSON.stringify(v) : String(v);
-            upsertPromises.push(
-              runQuery(
-                `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ('${escapeSql(k)}', '${escapeSql(valStr)}') ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
-                env
-              )
-            );
+            items.push([k, valStr]);
           }
         }
 
-        await Promise.all(upsertPromises);
+        if (items.length > 0) {
+          const valueClauses = items.map(([k, valStr]) => `('${escapeSql(k)}', '${escapeSql(valStr)}')`).join(',');
+          await runQuery(
+            `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ${valueClauses} ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
+            env
+          );
+        }
+
         return jsonResponse({ status: 'success', message: 'Data owner berhasil disimpan' });
       }
 
@@ -388,22 +391,24 @@ export async function onRequest(context) {
         dataObj.bjp_deleted_records_v7 = JSON.stringify(allVoidedIds);
       }
 
-      // Upsert
-      const upsertPromises = [];
+      // Single Batch Upsert
+      const items = [];
       for (const [k, v] of Object.entries(dataObj)) {
         if (k === 'action' || k === 'payload') continue;
         if (v !== undefined && v !== null) {
           const valStr = typeof v === 'object' ? JSON.stringify(v) : String(v);
-          upsertPromises.push(
-            runQuery(
-              `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ('${escapeSql(k)}', '${escapeSql(valStr)}') ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
-              env
-            )
-          );
+          items.push([k, valStr]);
         }
       }
 
-      await Promise.all(upsertPromises);
+      if (items.length > 0) {
+        const valueClauses = items.map(([k, valStr]) => `('${escapeSql(k)}', '${escapeSql(valStr)}')`).join(',');
+        await runQuery(
+          `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ${valueClauses} ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
+          env
+        );
+      }
+
       return jsonResponse({ status: 'success', message: 'Data berhasil disimpan ke TiDB Cloud' });
     }
 
