@@ -283,7 +283,154 @@ export async function onRequest(context) {
         return jsonResponse({ status: 'success', message: 'Data owner berhasil disimpan' });
       }
 
-      // 2. Simpan Seluruh Data POS (saveAllData / saveData)
+      // 2. Simpan Data Delta / Inkremental (saveDelta)
+      if (action === 'saveDelta') {
+        const changedKeys = body.changedKeys || {};
+        const stockDeltas = body.stockDeltas || [];
+        const newLogs = body.newLogs || [];
+
+        // Baca semua data existing dari DB sekali saja
+        const existingRows = await runQuery('SELECT `key`, `value` FROM bjp_data', env);
+        const existingMap = {};
+        for (const r of existingRows) {
+          existingMap[r.key] = r.value;
+        }
+
+        // Merge changedKeys per-record (id + updatedAt)
+        const updatedItems = {};
+        for (const [key, incomingStr] of Object.entries(changedKeys)) {
+          if (key === 'bjp_raw_materials_v7') continue; // stok bahan baku pakai stockDeltas
+          const incoming = parseJsonSafe(incomingStr, null);
+          const existing = parseJsonSafe(existingMap[key], null);
+
+          if (key === 'bjp_finance_v7') {
+            // Finance = object { modalUsaha, profitSplit, expenses, incomes }
+            const incFin = incoming || {};
+            const exFin = existing || {};
+            updatedItems[key] = JSON.stringify({
+              modalUsaha: incFin.modalUsaha !== undefined ? incFin.modalUsaha : exFin.modalUsaha,
+              profitSplit: incFin.profitSplit || exFin.profitSplit,
+              expenses: mergeArrayRecords(incFin.expenses || [], exFin.expenses || [], 'date', []),
+              incomes: mergeArrayRecords(incFin.incomes || [], exFin.incomes || [], 'date', [])
+            });
+          } else if (Array.isArray(incoming)) {
+            const ex = Array.isArray(existing) ? existing : [];
+            updatedItems[key] = JSON.stringify(mergeArrayRecords(incoming, ex, 'date', []));
+          } else if (incoming !== null && incoming !== undefined) {
+            // Non-array value (string, object) - langsung overwrite
+            updatedItems[key] = typeof incoming === 'object' ? JSON.stringify(incoming) : String(incomingStr);
+          }
+        }
+
+        // Proses stockDeltas: baca bjp_raw_materials_v7, apply delta relatif
+        if (stockDeltas.length > 0) {
+          const rawMaterials = parseJsonSafe(existingMap['bjp_raw_materials_v7'], []);
+          if (Array.isArray(rawMaterials)) {
+            for (const sd of stockDeltas) {
+              const { materialId, outletId, delta } = sd;
+              if (!materialId || !outletId || typeof delta !== 'number') continue;
+              const rmIdx = rawMaterials.findIndex(rm => rm && rm.id === materialId);
+              if (rmIdx === -1) continue;
+              const rm = { ...rawMaterials[rmIdx] };
+              const stocks = { ...(rm.stocks || {}) };
+              const currentVal = Number(stocks[outletId]) || 0;
+              stocks[outletId] = Math.max(0, currentVal + delta);
+              rm.stocks = stocks;
+              // Update primary stock (first outlet key or outletId)
+              const primaryKey = Object.keys(stocks)[0] || outletId;
+              rm.stock = Number(stocks[primaryKey]) || 0;
+              rm.updatedAt = Date.now();
+              rawMaterials[rmIdx] = rm;
+            }
+            updatedItems['bjp_raw_materials_v7'] = JSON.stringify(rawMaterials);
+          }
+        }
+
+        // Append newLogs ke existing raw_material_logs
+        if (newLogs.length > 0) {
+          const existingLogs = parseJsonSafe(existingMap['bjp_raw_material_logs_v7'], []);
+          const logMap = new Map();
+          for (const l of existingLogs) { if (l && l.id) logMap.set(l.id, l); }
+          for (const l of newLogs) { if (l && l.id) logMap.set(l.id, l); }
+          const merged = Array.from(logMap.values());
+          merged.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+          updatedItems['bjp_raw_material_logs_v7'] = JSON.stringify(merged);
+        }
+
+        // Merge deleted records
+        if (body.deletedRecordIds) {
+          const incDel = Array.isArray(body.deletedRecordIds) ? body.deletedRecordIds : parseJsonSafe(body.deletedRecordIds, []);
+          const curDel = parseJsonSafe(existingMap['bjp_deleted_records_v7'], []);
+          const merged = Array.from(new Set([...curDel.map(String), ...incDel.map(String)]));
+          updatedItems['bjp_deleted_records_v7'] = JSON.stringify(merged);
+        }
+
+        // Update timestamp
+        updatedItems['bjp_last_updated_v7'] = String(Date.now());
+
+        // Batch upsert
+        const items = [];
+        for (const [k, v] of Object.entries(updatedItems)) {
+          if (v !== undefined && v !== null) {
+            items.push([k, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
+          }
+        }
+        if (items.length > 0) {
+          const valueClauses = items.map(([k, valStr]) => `('${escapeSql(k)}', '${escapeSql(valStr)}')`).join(',');
+          await runQuery(
+            `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ${valueClauses} ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
+            env
+          );
+        }
+
+        return jsonResponse({ status: 'success', message: 'Delta sync berhasil' });
+      }
+
+      // 2b. Arsip transaksi lama (archiveOld)
+      if (action === 'archiveOld') {
+        const txRows = await runQuery("SELECT `value` FROM bjp_data WHERE `key` = 'bjp_transactions_v7'", env);
+        if (txRows.length > 0) {
+          const allTx = parseJsonSafe(txRows[0].value, []);
+          if (Array.isArray(allTx) && allTx.length > 5000) {
+            const threeMonthsAgo = new Date();
+            threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+            const cutoff = threeMonthsAgo.toISOString();
+            const recent = [];
+            const old = [];
+            for (const tx of allTx) {
+              if (tx && tx.date && tx.date < cutoff) {
+                old.push(tx);
+              } else {
+                recent.push(tx);
+              }
+            }
+            if (old.length > 0) {
+              // Gabungkan ke arsip existing
+              const archRows = await runQuery("SELECT `value` FROM bjp_data WHERE `key` = 'bjp_transactions_archive_v7'", env);
+              const existingArchive = archRows.length > 0 ? parseJsonSafe(archRows[0].value, []) : [];
+              const archMap = new Map();
+              for (const t of existingArchive) { if (t && t.id) archMap.set(t.id, t); }
+              for (const t of old) { if (t && t.id) archMap.set(t.id, t); }
+              const mergedArchive = Array.from(archMap.values());
+
+              const items = [
+                ['bjp_transactions_v7', JSON.stringify(recent)],
+                ['bjp_transactions_archive_v7', JSON.stringify(mergedArchive)],
+                ['bjp_last_updated_v7', String(Date.now())]
+              ];
+              const valueClauses = items.map(([k, v]) => `('${escapeSql(k)}', '${escapeSql(v)}')`).join(',');
+              await runQuery(
+                `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ${valueClauses} ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
+                env
+              );
+              return jsonResponse({ status: 'success', message: `Arsip: ${old.length} transaksi dipindah`, archived: old.length, remaining: recent.length });
+            }
+          }
+        }
+        return jsonResponse({ status: 'success', message: 'Tidak ada transaksi yang perlu diarsipkan', archived: 0 });
+      }
+
+      // 3. Simpan Seluruh Data POS (saveAllData / saveData)
       const dataObj = body.payload || body;
 
       const existingRows = await runQuery('SELECT `key`, `value` FROM bjp_data', env);
