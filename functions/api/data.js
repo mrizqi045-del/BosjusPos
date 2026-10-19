@@ -442,6 +442,8 @@ export async function onRequest(context) {
       // Safety Guard
       const criticalArrayKeys = [
         'bjp_transactions_v7', 'bjp_products_v7', 'bjp_users_v7', 'bjp_outlets_v7', 'bjp_finance_v7',
+        'bjp_raw_materials_v7', 'bjp_raw_material_logs_v7', 'bjp_transfers_v7',
+        'bjp_stock_receipts_v7', 'bjp_stock_outs_v7', 'bjp_stock_opnames_v7', 'bjp_promos_v7',
         'ownerCashFlow', 'ownerOfficeTransfers', 'ownerDebtInstallments', 'ownerCapitalConfig',
         'bjp_owner_cashflow_v7', 'bjp_office_transfers_v7', 'bjp_owner_debts_v7', 'bjp_owner_capital_v7'
       ];
