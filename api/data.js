@@ -126,6 +126,24 @@ module.exports = async function handler(req, res) {
 
       const action = req.query.action || 'getData';
 
+      if (action === 'checkUpdate') {
+        const since = Number(req.query.since || 0);
+        const [rows] = await db.query("SELECT `value`, UNIX_TIMESTAMP(`updated_at`) * 1000 as ts FROM bjp_data WHERE `key` = 'bjp_last_updated_v7'");
+        let serverTime = 0;
+        if (rows.length > 0) {
+          serverTime = Number(rows[0].value) || Number(rows[0].ts) || 0;
+        } else {
+          const [maxRows] = await db.query("SELECT UNIX_TIMESTAMP(MAX(`updated_at`)) * 1000 as max_ts FROM bjp_data");
+          serverTime = maxRows.length > 0 && maxRows[0].max_ts ? Number(maxRows[0].max_ts) : 0;
+        }
+        return res.status(200).json({
+          status: 'success',
+          hasUpdate: serverTime > since,
+          serverTime,
+          clientSince: since
+        });
+      }
+
       if (action === 'getOwnerData') {
         const ownerKeys = [
           'ownerCapitalConfig', 'ownerCashFlow', 'ownerDebtInstallments', 'ownerOfficeTransfers',
@@ -396,6 +414,8 @@ module.exports = async function handler(req, res) {
         dataObj.bjp_voided_txs_v7 = JSON.stringify(allVoidedIds);
         dataObj.bjp_deleted_records_v7 = JSON.stringify(allVoidedIds);
       }
+
+      dataObj.bjp_last_updated_v7 = String(Date.now());
 
       // Eksekusi Upsert
       const upsertPromises = [];

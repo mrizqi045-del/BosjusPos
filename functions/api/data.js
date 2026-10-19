@@ -130,6 +130,27 @@ export async function onRequest(context) {
     if (request.method === 'GET') {
       const action = url.searchParams.get('action') || 'getData';
 
+      if (action === 'checkUpdate') {
+        const since = Number(url.searchParams.get('since') || 0);
+        const rows = await runQuery("SELECT `value`, UNIX_TIMESTAMP(`updated_at`) * 1000 as ts FROM bjp_data WHERE `key` = 'bjp_last_updated_v7'", env);
+        let serverTime = 0;
+        if (rows.length > 0) {
+          serverTime = Number(rows[0].value) || Number(rows[0].ts) || 0;
+        } else {
+          const maxRows = await runQuery("SELECT UNIX_TIMESTAMP(MAX(`updated_at`)) * 1000 as max_ts FROM bjp_data", env);
+          serverTime = maxRows.length > 0 && maxRows[0].max_ts ? Number(maxRows[0].max_ts) : 0;
+        }
+
+        return jsonResponse({
+          status: 'success',
+          hasUpdate: serverTime > since,
+          serverTime,
+          clientSince: since
+        }, 200, {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
+        });
+      }
+
       if (action === 'getOwnerData') {
         const ownerKeys = [
           'ownerCapitalConfig', 'ownerCashFlow', 'ownerDebtInstallments', 'ownerOfficeTransfers',
@@ -390,6 +411,8 @@ export async function onRequest(context) {
         dataObj.bjp_voided_txs_v7 = JSON.stringify(allVoidedIds);
         dataObj.bjp_deleted_records_v7 = JSON.stringify(allVoidedIds);
       }
+
+      dataObj.bjp_last_updated_v7 = String(Date.now());
 
       // Single Batch Upsert
       const items = [];
