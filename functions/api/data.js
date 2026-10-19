@@ -179,47 +179,6 @@ export async function onRequest(context) {
         ]);
       }
 
-      if (data['bjp_transactions_v7']) {
-        data['bjp_transactions_v7'] = data['bjp_transactions_v7'].replace(/INV-PC-900000-DEV-[A-Za-z0-9]+/g, 'INV-PC-900001');
-      }
-
-      if (data['bjp_raw_material_logs_v7']) {
-        const rawLogs = parseJsonSafe(data['bjp_raw_material_logs_v7'], []);
-        if (Array.isArray(rawLogs)) {
-          let updated = false;
-          const fixedLogs = rawLogs.map(l => {
-            if (!l) return l;
-            if (l.note && l.note.toLowerCase().includes('sirsak') && (String(l.refTxId).includes('900000') || String(l.source).includes('900000') || String(l.source).includes('DEV'))) {
-              updated = true;
-              return { ...l, date: '2026-10-13T03:08:13.000Z', refTxId: 'INV-PC-900001', source: 'Penjualan #PC-900001', updatedAt: Date.now() };
-            }
-            return l;
-          });
-          if (updated) {
-            data['bjp_raw_material_logs_v7'] = JSON.stringify(fixedLogs);
-          }
-        }
-      }
-
-      if (data['bjp_raw_materials_v7']) {
-        const rms = parseJsonSafe(data['bjp_raw_materials_v7'], []);
-        if (Array.isArray(rms)) {
-          let updated = false;
-          const fixedRMs = rms.map(rm => {
-            if (rm && rm.name && rm.name.toLowerCase().includes('sirsak') && Number(rm.stock) === 44) {
-              updated = true;
-              const stocks = { ...(rm.stocks || {}) };
-              stocks['out-xqwj31v61'] = 43;
-              return { ...rm, stock: 43, stocks, updatedAt: Date.now() };
-            }
-            return rm;
-          });
-          if (updated) {
-            data['bjp_raw_materials_v7'] = JSON.stringify(fixedRMs);
-          }
-        }
-      }
-
       return jsonResponse({ status: 'success', data }, 200, {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate'
       });
@@ -531,20 +490,27 @@ export async function onRequest(context) {
         dataObj.bjp_raw_material_logs_v7 = JSON.stringify(mergeArrayRecords(inc, ex, 'date', allVoidedIds));
       }
 
-      const fixSirsakStock = (rawStr) => {
-        const rms = parseJsonSafe(rawStr, []);
-        if (!Array.isArray(rms)) return rawStr;
-        return JSON.stringify(rms.map(rm => {
-          if (rm && rm.name && rm.name.toLowerCase().includes('sirsak') && Number(rm.stock) === 44) {
-            const stocks = { ...(rm.stocks || {}) };
-            stocks['out-xqwj31v61'] = 43;
-            return { ...rm, stock: 43, stocks, updatedAt: Date.now() };
+      if (dataObj.bjp_raw_materials_v7 && existingMap.bjp_raw_materials_v7) {
+        const inc = parseJsonSafe(dataObj.bjp_raw_materials_v7, []);
+        const ex = parseJsonSafe(existingMap.bjp_raw_materials_v7, []);
+        if (Array.isArray(inc) && Array.isArray(ex)) {
+          const map = new Map();
+          for (const item of ex) {
+            if (item && item.id && !allVoidedIds.includes(String(item.id))) {
+              map.set(String(item.id), item);
+            }
           }
-          return rm;
-        }));
-      };
-      if (dataObj.bjp_raw_materials_v7) dataObj.bjp_raw_materials_v7 = fixSirsakStock(dataObj.bjp_raw_materials_v7);
-      if (existingMap.bjp_raw_materials_v7) existingMap.bjp_raw_materials_v7 = fixSirsakStock(existingMap.bjp_raw_materials_v7);
+          for (const item of inc) {
+            if (item && item.id && !allVoidedIds.includes(String(item.id))) {
+              const cur = map.get(String(item.id));
+              if (!cur || (Number(item.updatedAt) || 0) > (Number(cur.updatedAt) || 0)) {
+                map.set(String(item.id), item);
+              }
+            }
+          }
+          dataObj.bjp_raw_materials_v7 = JSON.stringify(Array.from(map.values()));
+        }
+      }
 
       if (dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7 || existingMap.ownerOfficeTransfers || existingMap.bjp_office_transfers_v7) {
         const inc = parseJsonSafe(dataObj.ownerOfficeTransfers || dataObj.bjp_office_transfers_v7, null);
