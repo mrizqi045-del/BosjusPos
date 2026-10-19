@@ -5,11 +5,11 @@ let pool = null;
 
 function getPool() {
   if (!pool) {
-    const host = process.env.TIDB_HOST || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
-    const port = parseInt(process.env.TIDB_PORT || '4000', 10);
-    const user = process.env.TIDB_USER || 'WfFgzjTRaRoALsg.root';
-    const password = process.env.TIDB_PASSWORD || 'yRi0mmi6ptNuctfi';
-    const database = process.env.TIDB_DATABASE || 'test';
+    const host = 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+    const port = 4000;
+    const user = 'WfFgzjTRaRoALsg.root';
+    const password = 'yRi0mmi6ptNuctfi';
+    const database = 'test';
 
     if (!host || !user) {
       throw new Error('Database credentials missing: Please set TIDB_HOST, TIDB_USER, and TIDB_PASSWORD in environment variables.');
