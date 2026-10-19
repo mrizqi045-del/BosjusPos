@@ -4,7 +4,7 @@
 // =====================================================================
 
 const SPREADSHEET_ID_BOSJUS = '1NLjrGbzKrnZERmm1o8_fUztevVaYhWsG7JDtsPXWR7o';
-const TIDB_API_URL = 'https://bosjuspos.vercel.app/api/data?action=getData';
+const TIDB_API_URL = 'https://bosjuspos.pages.dev/api/data?action=getData';
 
 function syncTiDBToSpreadsheet() {
   try {
