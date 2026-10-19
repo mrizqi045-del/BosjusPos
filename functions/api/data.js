@@ -1,24 +1,54 @@
-import { connect } from '@tidbcloud/serverless';
-
-function getDb(env) {
-  const url = (env && env.TIDB_URL) ||
-    (env && env.TIDB_HOST && env.TIDB_USER && env.TIDB_PASSWORD
-      ? `mysql://${env.TIDB_USER}:${env.TIDB_PASSWORD}@${env.TIDB_HOST}:${env.TIDB_PORT || 4000}/${env.TIDB_DATABASE || 'test'}`
-      : 'mysql://WfFgzjTRaRoALsg.root:yRi0mmi6ptNuctfi@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/test');
-  return connect({ url });
+function escapeSql(str) {
+  if (typeof str !== 'string') return String(str);
+  return str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, (char) => {
+    switch (char) {
+      case "\0": return "\\0";
+      case "\x08": return "\\b";
+      case "\x09": return "\\t";
+      case "\x1a": return "\\z";
+      case "\n": return "\\n";
+      case "\r": return "\\r";
+      case "\"":
+      case "'":
+      case "\\":
+      case "%":
+        return "\\" + char;
+      default:
+        return char;
+    }
+  });
 }
 
-let tableChecked = false;
-async function ensureTable(db) {
-  if (tableChecked) return;
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS bjp_data (
-      \`key\` VARCHAR(191) NOT NULL PRIMARY KEY,
-      \`value\` LONGTEXT NOT NULL,
-      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-  `);
-  tableChecked = true;
+async function runQuery(sql, env) {
+  const host = (env && env.TIDB_HOST) || 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com';
+  const user = (env && env.TIDB_USER) || 'WfFgzjTRaRoALsg.root';
+  const password = (env && env.TIDB_PASSWORD) || 'yRi0mmi6ptNuctfi';
+  const database = (env && env.TIDB_DATABASE) || 'test';
+
+  const url = `https://http-${host}/v1beta/sql`;
+  const auth = btoa(`${user}:${password}`);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Basic ${auth}`,
+      'TiDB-Database': database
+    },
+    body: JSON.stringify({ query: sql })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`TiDB error: ${errText}`);
+  }
+
+  const data = await res.json();
+  const fields = (data.types || []).map(t => t.name);
+  return (data.rows || []).map(row => {
+    const obj = {};
+    fields.forEach((f, idx) => { obj[f] = row[idx]; });
+    return obj;
+  });
 }
 
 function parseJsonSafe(val, fallback) {
@@ -94,9 +124,6 @@ export async function onRequest(context) {
   };
 
   try {
-    const db = getDb(env);
-    await ensureTable(db);
-
     // ==========================================
     // GET: Ambil Data (getAllData / getOwnerData)
     // ==========================================
@@ -109,7 +136,7 @@ export async function onRequest(context) {
           'bjp_owner_capital_v7', 'bjp_owner_cashflow_v7', 'bjp_owner_debts_v7', 'bjp_office_transfers_v7'
         ];
         const quotedKeys = ownerKeys.map(k => `'${k}'`).join(',');
-        const rows = await db.execute(`SELECT \`key\`, \`value\` FROM bjp_data WHERE \`key\` IN (${quotedKeys})`);
+        const rows = await runQuery(`SELECT \`key\`, \`value\` FROM bjp_data WHERE \`key\` IN (${quotedKeys})`, env);
         const data = {};
         for (const row of rows) {
           data[row.key] = row.value;
@@ -120,25 +147,22 @@ export async function onRequest(context) {
       }
 
       // Default: getData / getDatabase
-      const rows = await db.execute('SELECT `key`, `value` FROM bjp_data');
+      const rows = await runQuery('SELECT `key`, `value` FROM bjp_data', env);
       const data = {};
       for (const row of rows) {
         data[row.key] = row.value;
       }
 
-      // Pastikan outlet default selalu ada
       if (!data['bjp_outlets_v7'] || data['bjp_outlets_v7'] === '[]' || data['bjp_outlets_v7'] === '') {
         data['bjp_outlets_v7'] = JSON.stringify([
           { id: 'out-xqwj31v61', name: 'Sampit', address: 'Sampit Bundaran' }
         ]);
       }
 
-      // Normalisasi invoice dev tabrakan
       if (data['bjp_transactions_v7']) {
         data['bjp_transactions_v7'] = data['bjp_transactions_v7'].replace(/INV-PC-900000-DEV-[A-Za-z0-9]+/g, 'INV-PC-900001');
       }
 
-      // Normalisasi log mutasi Sirsak
       if (data['bjp_raw_material_logs_v7']) {
         const rawLogs = parseJsonSafe(data['bjp_raw_material_logs_v7'], []);
         if (Array.isArray(rawLogs)) {
@@ -157,7 +181,6 @@ export async function onRequest(context) {
         }
       }
 
-      // Normalisasi master stok sirsak
       if (data['bjp_raw_materials_v7']) {
         const rms = parseJsonSafe(data['bjp_raw_materials_v7'], []);
         if (Array.isArray(rms)) {
@@ -198,11 +221,10 @@ export async function onRequest(context) {
       // 1. Simpan Data Owner
       if (action === 'saveOwnerData') {
         const payload = body.payload || body;
-        const upsertPromises = [];
 
         if (payload.bjp_deleted_records_v7) {
           const incDel = parseJsonSafe(payload.bjp_deleted_records_v7, []);
-          const curDelRows = await db.execute("SELECT `value` FROM bjp_data WHERE `key` = 'bjp_deleted_records_v7'");
+          const curDelRows = await runQuery("SELECT `value` FROM bjp_data WHERE `key` = 'bjp_deleted_records_v7'", env);
           const curDel = curDelRows.length > 0 ? parseJsonSafe(curDelRows[0].value, []) : [];
           const mergedDel = Array.from(new Set([...curDel.map(String), ...incDel.map(String)]));
           payload.bjp_deleted_records_v7 = JSON.stringify(mergedDel);
@@ -220,13 +242,14 @@ export async function onRequest(context) {
           bjp_deleted_records_v7: payload.bjp_deleted_records_v7
         };
 
+        const upsertPromises = [];
         for (const [k, v] of Object.entries(mapping)) {
           if (v !== undefined && v !== null && v !== '') {
             const valStr = typeof v === 'object' ? JSON.stringify(v) : String(v);
             upsertPromises.push(
-              db.execute(
-                'INSERT INTO bjp_data (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_at = CURRENT_TIMESTAMP',
-                [k, valStr]
+              runQuery(
+                `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ('${escapeSql(k)}', '${escapeSql(valStr)}') ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
+                env
               )
             );
           }
@@ -239,7 +262,7 @@ export async function onRequest(context) {
       // 2. Simpan Seluruh Data POS (saveAllData / saveData)
       const dataObj = body.payload || body;
 
-      const existingRows = await db.execute('SELECT `key`, `value` FROM bjp_data');
+      const existingRows = await runQuery('SELECT `key`, `value` FROM bjp_data', env);
       const existingMap = {};
       for (const r of existingRows) {
         existingMap[r.key] = r.value;
@@ -372,9 +395,9 @@ export async function onRequest(context) {
         if (v !== undefined && v !== null) {
           const valStr = typeof v === 'object' ? JSON.stringify(v) : String(v);
           upsertPromises.push(
-            db.execute(
-              'INSERT INTO bjp_data (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_at = CURRENT_TIMESTAMP',
-              [k, valStr]
+            runQuery(
+              `INSERT INTO bjp_data (\`key\`, \`value\`) VALUES ('${escapeSql(k)}', '${escapeSql(valStr)}') ON DUPLICATE KEY UPDATE \`value\` = VALUES(\`value\`), updated_at = CURRENT_TIMESTAMP`,
+              env
             )
           );
         }
