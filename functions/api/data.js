@@ -562,9 +562,10 @@ export async function onRequest(context) {
       dataObj.bjp_last_updated_v7 = String(Date.now());
 
       // Single Batch Upsert
+      const skipFields = new Set(['action', 'payload', 'changedKeys', 'stockDeltas', 'newLogs', 'deletedRecordIds', '_forceHumanSync']);
       const items = [];
       for (const [k, v] of Object.entries(dataObj)) {
-        if (k === 'action' || k === 'payload') continue;
+        if (skipFields.has(k)) continue;
         if (v !== undefined && v !== null) {
           const valStr = typeof v === 'object' ? JSON.stringify(v) : String(v);
           items.push([k, valStr]);
