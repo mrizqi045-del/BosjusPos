@@ -71,21 +71,12 @@ function mergeArrayRecords(incomingArr, existingArr, sortKey = 'date', voidedIds
     if (item && item.id && !voidSet.has(String(item.id))) {
       if (map.has(item.id)) {
         const existing = map.get(item.id);
-        const incUp = Number(item.updatedAt) || 0;
-        const exUp = Number(existing.updatedAt) || 0;
-        if (incUp > 0 && incUp >= exUp) {
+        const incUp = Number(item.updatedAt) || (item.date ? new Date(item.date).getTime() : 0);
+        const exUp = Number(existing.updatedAt) || (existing.date ? new Date(existing.date).getTime() : 0);
+        if (incUp >= exUp || (existing.status === 'pending' && item.status !== 'pending')) {
           map.set(item.id, item);
-          continue;
         }
-        if (exUp > incUp) {
-          continue;
-        }
-        if (existing.date && item.date && existing.date !== item.date && Math.abs(new Date(existing.date) - new Date(item.date)) > 5000) {
-          const disambiguatedId = `${item.id}-DEV-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
-          item.id = disambiguatedId;
-          map.set(disambiguatedId, item);
-          continue;
-        }
+        continue;
       }
       map.set(item.id, item);
     }
@@ -257,7 +248,28 @@ export async function onRequest(context) {
         // Merge changedKeys per-record (id + updatedAt)
         const updatedItems = {};
         for (const [key, incomingStr] of Object.entries(changedKeys)) {
-          if (key === 'bjp_raw_materials_v7') continue; // stok bahan baku pakai stockDeltas
+          if (key === 'bjp_raw_materials_v7') {
+            const incomingRMs = parseJsonSafe(incomingStr, []);
+            const existingRMs = parseJsonSafe(existingMap[key], []);
+            if (Array.isArray(incomingRMs) && incomingRMs.length > 0) {
+              const rmMap = new Map();
+              for (const rm of existingRMs) {
+                if (rm && rm.id) rmMap.set(String(rm.id), rm);
+              }
+              for (const rm of incomingRMs) {
+                if (rm && rm.id) {
+                  const ex = rmMap.get(String(rm.id));
+                  const incUp = Number(rm.updatedAt) || 0;
+                  const exUp = ex ? (Number(ex.updatedAt) || 0) : 0;
+                  if (!ex || incUp >= exUp) {
+                    rmMap.set(String(rm.id), rm);
+                  }
+                }
+              }
+              updatedItems[key] = JSON.stringify(Array.from(rmMap.values()));
+            }
+            continue;
+          }
           const incoming = parseJsonSafe(incomingStr, null);
           const existing = parseJsonSafe(existingMap[key], null);
 
@@ -280,9 +292,10 @@ export async function onRequest(context) {
           }
         }
 
-        // Proses stockDeltas: baca bjp_raw_materials_v7, apply delta relatif
+        // Proses stockDeltas: baca bjp_raw_materials_v7 (prioritaskan updatedItems jika baru di-update), apply delta relatif
         if (stockDeltas.length > 0) {
-          const rawMaterials = parseJsonSafe(existingMap['bjp_raw_materials_v7'], []);
+          const baseStr = updatedItems['bjp_raw_materials_v7'] || existingMap['bjp_raw_materials_v7'];
+          const rawMaterials = parseJsonSafe(baseStr, []);
           if (Array.isArray(rawMaterials)) {
             for (const sd of stockDeltas) {
               const { materialId, outletId, delta } = sd;
@@ -294,9 +307,9 @@ export async function onRequest(context) {
               const currentVal = Number(stocks[outletId]) || 0;
               stocks[outletId] = Math.max(0, currentVal + delta);
               rm.stocks = stocks;
-              // Update primary stock (first outlet key or outletId)
-              const primaryKey = Object.keys(stocks)[0] || outletId;
-              rm.stock = Number(stocks[primaryKey]) || 0;
+              // Update primary stock
+              const primaryKey = outletId === 'out-1' ? 'out-xqwj31v61' : outletId;
+              rm.stock = Number(stocks[primaryKey] !== undefined ? stocks[primaryKey] : (stocks['out-xqwj31v61'] || 0));
               rm.updatedAt = Date.now();
               rawMaterials[rmIdx] = rm;
             }
@@ -324,7 +337,8 @@ export async function onRequest(context) {
         }
 
         // Update timestamp
-        updatedItems['bjp_last_updated_v7'] = String(Date.now());
+        const serverNow = String(Date.now());
+        updatedItems['bjp_last_updated_v7'] = serverNow;
 
         // Batch upsert
         const items = [];
@@ -341,7 +355,7 @@ export async function onRequest(context) {
           );
         }
 
-        return jsonResponse({ status: 'success', message: 'Delta sync berhasil' });
+        return jsonResponse({ status: 'success', message: 'Delta sync berhasil', lastUpdated: serverNow });
       }
 
       // 2b. Arsip transaksi lama (archiveOld)
